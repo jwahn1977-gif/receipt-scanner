@@ -33,6 +33,7 @@ jobs:
           cp package/tesseract-core-simd-lstm.wasm.js package/tesseract-core-lstm.wasm.js $T/
           curl -sL -o $T/lang/kor.traineddata https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/kor.traineddata
           curl -sL -o $T/lang/eng.traineddata https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/eng.traineddata
+          rm -rf package *.tgz
 
       - uses: actions/setup-java@v4
         with:
@@ -42,12 +43,14 @@ jobs:
       - uses: android-actions/setup-android@v3
 
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
 
       - name: Build APK
-        run: gradle assembleRelease --no-daemon
+        run: gradle assembleDebug --no-daemon --stacktrace
 
       - name: Rename APK
-        run: cp app/build/outputs/apk/release/app-release.apk ReceiptScanner.apk
+        run: cp app/build/outputs/apk/debug/app-debug.apk ReceiptScanner.apk
 
       - uses: actions/upload-artifact@v4
         with:
