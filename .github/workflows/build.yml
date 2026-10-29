@@ -10,19 +10,21 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Unpack project.zip
+        id: unpack
         run: |
-          if [ -f project.zip ]; then
-            unzip -o -q project.zip -d _p
-            cp -r _p/receipt-scanner-apk/. .
-            rm -rf _p
-          fi
+          set -e
+          unzip -o -q project.zip -d _p
+          cp -r _p/receipt-scanner-apk/. .
+          rm -rf _p
+          ls -la
 
       - name: Download OCR engine
+        id: ocr
         run: |
           set -e
           T=app/src/main/assets/tess
@@ -31,28 +33,37 @@ jobs:
           tar xzf tesseract.js-5.1.1.tgz && tar xzf tesseract.js-core-5.1.1.tgz
           cp package/dist/tesseract.min.js package/dist/worker.min.js $T/
           cp package/tesseract-core-simd-lstm.wasm.js package/tesseract-core-lstm.wasm.js $T/
-          curl -sL -o $T/lang/kor.traineddata https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/kor.traineddata
-          curl -sL -o $T/lang/eng.traineddata https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/eng.traineddata
+          curl -fsSL -o $T/lang/kor.traineddata https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/kor.traineddata
+          curl -fsSL -o $T/lang/eng.traineddata https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/eng.traineddata
           rm -rf package *.tgz
+          ls -la $T $T/lang
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 17
 
-      - uses: android-actions/setup-android@v3
+      - name: Check Android SDK
+        id: sdk
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          ls "$ANDROID_HOME/platforms" "$ANDROID_HOME/build-tools"
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
 
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v5
         with:
           gradle-version: "8.11.1"
 
       - name: Build APK
-        run: gradle assembleDebug --no-daemon --stacktrace
+        id: gradle
+        run: |
+          set -o pipefail
+          gradle assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log
 
       - name: Rename APK
         run: cp app/build/outputs/apk/debug/app-debug.apk ReceiptScanner.apk
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: ReceiptScanner-apk
           path: ReceiptScanner.apk
@@ -63,3 +74,12 @@ jobs:
           name: 영수증 스캐너 APK (빌드 ${{ github.run_number }})
           body: "휴대폰에서 아래 ReceiptScanner.apk 를 눌러 내려받은 뒤 설치하세요."
           files: ReceiptScanner.apk
+
+      - name: Report failure
+        if: failure()
+        run: |
+          echo "::error title=step results::unpack=${{ steps.unpack.outcome }} ocr=${{ steps.ocr.outcome }} sdk=${{ steps.sdk.outcome }} gradle=${{ steps.gradle.outcome }}"
+          if [ -f build.log ]; then
+            grep -E "error:|ERROR|FAILURE|What went wrong|Could not|e: |\.java:[0-9]+" build.log | head -15 | while IFS= read -r l; do echo "::error title=gradle::$l"; done
+            tail -5 build.log | while IFS= read -r l; do echo "::error title=gradle-tail::$l"; done
+          fi
