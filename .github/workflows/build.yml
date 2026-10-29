@@ -1,1 +1,62 @@
+name: Build APK
 
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Unpack project.zip
+        run: |
+          if [ -f project.zip ]; then
+            unzip -o -q project.zip -d _p
+            cp -r _p/receipt-scanner-apk/. .
+            rm -rf _p
+          fi
+
+      - name: Download OCR engine
+        run: |
+          set -e
+          T=app/src/main/assets/tess
+          mkdir -p $T/lang
+          npm pack tesseract.js@5.1.1 tesseract.js-core@5.1.1 >/dev/null
+          tar xzf tesseract.js-5.1.1.tgz && tar xzf tesseract.js-core-5.1.1.tgz
+          cp package/dist/tesseract.min.js package/dist/worker.min.js $T/
+          cp package/tesseract-core-simd-lstm.wasm.js package/tesseract-core-lstm.wasm.js $T/
+          curl -sL -o $T/lang/kor.traineddata https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/kor.traineddata
+          curl -sL -o $T/lang/eng.traineddata https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/eng.traineddata
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build APK
+        run: gradle assembleRelease --no-daemon
+
+      - name: Rename APK
+        run: cp app/build/outputs/apk/release/app-release.apk ReceiptScanner.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ReceiptScanner-apk
+          path: ReceiptScanner.apk
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: 영수증 스캐너 APK (빌드 ${{ github.run_number }})
+          body: "휴대폰에서 아래 ReceiptScanner.apk 를 눌러 내려받은 뒤 설치하세요."
+          files: ReceiptScanner.apk
